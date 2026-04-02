@@ -179,6 +179,13 @@ export class MediaStore {
   public async setSource(sourceType: 'native' | 'wnp' | 'auto'): Promise<void> {
     console.log(`Setting media source to: ${sourceType}`);
 
+    // Guard against undefined source type
+    if (!sourceType || sourceType === 'undefined' || sourceType === 'null') {
+      console.warn('Invalid source type, defaulting to native');
+      await this.switchToSource(this.nativeSource);
+      return;
+    }
+
     if (sourceType === 'auto') {
       const wnpAvailable = await this.detectWNPAvailability();
       if (wnpAvailable) {

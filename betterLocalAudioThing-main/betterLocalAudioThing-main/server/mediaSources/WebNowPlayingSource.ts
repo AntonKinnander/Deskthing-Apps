@@ -193,18 +193,23 @@ export class WebNowPlayingSource extends MediaSource {
         volume: wnpData.volume,
       });
 
-      // Download and save cover art if present
+      // Download and save cover art if present - wrap in try-catch to prevent crash
       let thumbnailUrl: string | null = null;
       if (wnpData.cover_url) {
-        const fileNameParts = [wnpData.player_name, wnpData.title, wnpData.artist]
-          .filter((part) => part && part.trim().length > 0);
-        const sanitizedFileName = (fileNameParts.length > 0 ? fileNameParts.join('-') : 'unknown').replace(
-          /[<>:"/\\|?*]/g,
-          '_'
-        );
-        console.log('WebNowPlaying: Downloading cover art from:', wnpData.cover_url);
-        thumbnailUrl = await saveImage(wnpData.cover_url, sanitizedFileName) || null;
-        console.log('WebNowPlaying: Cover art saved to:', thumbnailUrl);
+        try {
+          const fileNameParts = [wnpData.player_name, wnpData.title, wnpData.artist]
+            .filter((part) => part && part.trim().length > 0);
+          const sanitizedFileName = (fileNameParts.length > 0 ? fileNameParts.join('-') : 'unknown').replace(
+            /[<>:"/\\|?*]/g,
+            '_'
+          );
+          console.log('WebNowPlaying: Downloading cover art from:', wnpData.cover_url);
+          thumbnailUrl = await saveImage(wnpData.cover_url, sanitizedFileName) || null;
+          console.log('WebNowPlaying: Cover art saved to:', thumbnailUrl);
+        } catch (imageError) {
+          console.error('WebNowPlaying: Failed to download cover art:', imageError);
+          thumbnailUrl = null;
+        }
       } else {
         console.log('WebNowPlaying: No cover_url in WNP data');
       }
@@ -214,6 +219,7 @@ export class WebNowPlayingSource extends MediaSource {
       this.notifySongChange(this.currentSongData);
     } catch (error) {
       console.error('WebNowPlaying: Failed to parse message:', error);
+      // Don't crash the app on parse errors
     }
   }
 
@@ -221,6 +227,17 @@ export class WebNowPlayingSource extends MediaSource {
    * Parse WNP data format to SongData
    */
   private parseWNPDataToSongData(wnpData: WNPData, thumbnailUrl: string | null): SongData {
+    // Defensive: Ensure numeric fields are valid numbers
+    const durationSeconds = typeof wnpData.duration_seconds === 'number' && !isNaN(wnpData.duration_seconds)
+      ? wnpData.duration_seconds
+      : 0;
+    const positionSeconds = typeof wnpData.position_seconds === 'number' && !isNaN(wnpData.position_seconds)
+      ? wnpData.position_seconds
+      : 0;
+    const volume = typeof wnpData.volume === 'number' && !isNaN(wnpData.volume)
+      ? wnpData.volume
+      : 0;
+
     return {
       version: 2,
       album: wnpData.album || null,
@@ -228,13 +245,13 @@ export class WebNowPlayingSource extends MediaSource {
       playlist: null,
       playlist_id: null,
       track_name: wnpData.title || 'Unknown Track',
-      shuffle_state: wnpData.shuffle_active || null,
-      repeat_state: this.mapRepeatMode(wnpData.repeat_mode),
+      shuffle_state: typeof wnpData.shuffle_active === 'boolean' ? wnpData.shuffle_active : null,
+      repeat_state: this.mapRepeatMode(wnpData.repeat_mode || 'NONE'),
       is_playing: wnpData.state === 'PLAYING',
       abilities: this.getWNPAbilities(),
-      track_duration: wnpData.duration_seconds * 1000, // Convert to ms
-      track_progress: wnpData.position_seconds * 1000, // Convert to ms
-      volume: wnpData.volume || 0,
+      track_duration: durationSeconds * 1000, // Convert to ms
+      track_progress: positionSeconds * 1000, // Convert to ms
+      volume: volume,
       thumbnail: thumbnailUrl,
       device: wnpData.player_name || null,
       id: null,
