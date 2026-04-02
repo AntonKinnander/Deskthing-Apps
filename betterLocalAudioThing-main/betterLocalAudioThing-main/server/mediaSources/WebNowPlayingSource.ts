@@ -49,6 +49,8 @@ export class WebNowPlayingSource extends MediaSource {
   private static readonly CONNECTION_TIMEOUT_MS = 5000;
   private static readonly INITIAL_RECONNECT_DELAY_MS = 1000;
   private static readonly MAX_RECONNECT_DELAY_MS = 30000;
+  private static readonly HEARTBEAT_INTERVAL_MS = 30000;
+  private static readonly HEARTBEAT_TIMEOUT_THRESHOLD_MS = 60000;
 
   private ws: WebSocket.WebSocket | null = null;
   private _isConnected = false;
@@ -56,6 +58,8 @@ export class WebNowPlayingSource extends MediaSource {
   private isDisposed = false;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private connectionTimeout: NodeJS.Timeout | null = null;
+  private heartbeatIntervalId: NodeJS.Timeout | null = null;
+  private lastMessageTime: number = Date.now();
   private currentReconnectDelay: number = WebNowPlayingSource.INITIAL_RECONNECT_DELAY_MS;
 
   // Cache the latest song data
@@ -117,6 +121,9 @@ export class WebNowPlayingSource extends MediaSource {
 
           console.log('WebNowPlaying: Connected');
 
+          // Start heartbeat monitoring
+          this.startHeartbeat();
+
           // Send handshake
           try {
             this.ws?.send('RECIPIENT');
@@ -163,6 +170,9 @@ export class WebNowPlayingSource extends MediaSource {
    * Handle incoming messages from WebNowPlaying
    */
   private async handleMessage(data: WebSocket.Data): Promise<void> {
+    // Update last message time for heartbeat monitoring
+    this.lastMessageTime = Date.now();
+
     try {
       const message = data.toString();
       const wnpData: WNPData = JSON.parse(message);
@@ -337,6 +347,7 @@ export class WebNowPlayingSource extends MediaSource {
    */
   private cleanup(): void {
     this.clearConnectionTimeout();
+    this.stopHeartbeat();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -344,6 +355,47 @@ export class WebNowPlayingSource extends MediaSource {
     if (this.ws) {
       // Note: close() may have already been called in dispose()
       this.ws = null;
+    }
+  }
+
+  /**
+   * Start heartbeat monitoring to detect stale connections
+   */
+  private startHeartbeat(): void {
+    // Clear any existing heartbeat interval
+    this.stopHeartbeat();
+
+    // Initialize last message time
+    this.lastMessageTime = Date.now();
+
+    this.heartbeatIntervalId = setInterval(() => {
+      if (!this._isConnected || this.isDisposed) {
+        this.stopHeartbeat();
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceLastMessage = now - this.lastMessageTime;
+
+      if (timeSinceLastMessage > WebNowPlayingSource.HEARTBEAT_TIMEOUT_THRESHOLD_MS) {
+        console.warn(
+          `WebNowPlaying: No data received for ${Math.floor(timeSinceLastMessage / 1000)}s. ` +
+            `Connection may be stale.`
+        );
+        // Reset the timestamp to avoid spamming warnings, but let the natural
+        // reconnection logic handle the actual reconnection if needed
+        this.lastMessageTime = now;
+      }
+    }, WebNowPlayingSource.HEARTBEAT_INTERVAL_MS);
+  }
+
+  /**
+   * Stop heartbeat monitoring
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
     }
   }
 
