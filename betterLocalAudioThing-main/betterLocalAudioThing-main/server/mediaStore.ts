@@ -16,11 +16,12 @@ export class MediaStore {
   private nativeSource: NativeMediaSource;
   private wnpSource: WebNowPlayingSourceStub | null = null;
 
-  // Legacy fields kept for backward compatibility during transition
-  private availableSources: string[] = [];
-
   // Fallback settings
   private fallbackToNative: boolean = true;
+
+  // Store callback cleanup functions to prevent memory leaks
+  private songChangeCleanup: (() => void) | null = null;
+  private disconnectCleanup: (() => void) | null = null;
 
   private constructor() {
     this.nativeSource = new NativeMediaSource();
@@ -30,15 +31,20 @@ export class MediaStore {
 
   /**
    * Setup callbacks for the current media source
+   * Stores cleanup functions to allow proper callback removal
    */
   private setupSourceCallbacks(): void {
-    this.currentSource.onSongChange((song) => {
+    // Clean up old callbacks if they exist
+    this.clearSourceCallbacks();
+
+    // Set up new callbacks and store their cleanup functions
+    this.songChangeCleanup = this.currentSource.onSongChange((song) => {
       if (song) {
         DeskThing.sendSong(song);
       }
     });
 
-    this.currentSource.onDisconnect(() => {
+    this.disconnectCleanup = this.currentSource.onDisconnect(() => {
       console.log('MediaSource disconnected:', this.currentSource.getSourceName());
       // Fallback logic: if WNP disconnects and fallback is enabled, switch to native
       if (this.currentSource.getSourceName() === 'WebNowPlaying' && this.fallbackToNative) {
@@ -51,6 +57,20 @@ export class MediaStore {
   }
 
   /**
+   * Clear existing callbacks by calling their cleanup functions
+   */
+  private clearSourceCallbacks(): void {
+    if (this.songChangeCleanup) {
+      this.songChangeCleanup();
+      this.songChangeCleanup = null;
+    }
+    if (this.disconnectCleanup) {
+      this.disconnectCleanup();
+      this.disconnectCleanup = null;
+    }
+  }
+
+  /**
    * Initialize the media store and the current media source
    */
   public initializeListeners = async () => {
@@ -60,52 +80,65 @@ export class MediaStore {
   /**
    * Detect if WebNowPlaying browser extension is available
    * Attempts to connect to ws://localhost:6534 with a timeout
+   * Uses dynamic import to avoid crash if ws module is not available
    */
   public async detectWNPAvailability(): Promise<boolean> {
     const WNP_PORT = 6534;
     const WNP_HOST = 'localhost';
     const TIMEOUT_MS = 3000;
 
-    return new Promise<boolean>((resolve) => {
-      const WebSocket = require('ws'); // Will be added in Task 2
-      const socket = new WebSocket(`ws://${WNP_HOST}:${WNP_PORT}`);
-      let resolved = false;
+    try {
+      // Dynamically import ws module - returns false if not available
+      const wsModule = await import('ws').catch(() => null);
+      if (!wsModule) {
+        console.log('ws module not available - WebNowPlaying cannot be detected');
+        return false;
+      }
 
-      const cleanup = () => {
-        if (!resolved) {
-          resolved = true;
-          socket.close();
-        }
-      };
+      return new Promise<boolean>((resolve) => {
+        const WebSocket = wsModule.default;
+        const socket = new WebSocket(`ws://${WNP_HOST}:${WNP_PORT}`);
+        let resolved = false;
 
-      socket.on('open', () => {
-        console.log('WebNowPlaying detected at ws://localhost:6534');
-        cleanup();
-        resolve(true);
-      });
+        const cleanup = () => {
+          if (!resolved) {
+            resolved = true;
+            socket.close();
+          }
+        };
 
-      socket.on('error', () => {
-        // Connection failed - WNP not available
-        cleanup();
-        resolve(false);
-      });
+        socket.on('open', () => {
+          console.log('WebNowPlaying detected at ws://localhost:6534');
+          cleanup();
+          resolve(true);
+        });
 
-      socket.on('close', () => {
-        cleanup();
-        if (!resolved) {
-          resolve(false);
-        }
-      });
-
-      // Timeout fallback
-      setTimeout(() => {
-        if (!resolved) {
-          console.log('WebNowPlaying detection timed out');
+        socket.on('error', () => {
+          // Connection failed - WNP not available
           cleanup();
           resolve(false);
-        }
-      }, TIMEOUT_MS);
-    });
+        });
+
+        socket.on('close', () => {
+          cleanup();
+          if (!resolved) {
+            resolve(false);
+          }
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+          if (!resolved) {
+            console.log('WebNowPlaying detection timed out');
+            cleanup();
+            resolve(false);
+          }
+        }, TIMEOUT_MS);
+      });
+    } catch (error) {
+      console.error('Error detecting WebNowPlaying availability:', error);
+      return false;
+    }
   }
 
   /**
@@ -168,13 +201,12 @@ export class MediaStore {
     console.log(`Switched to media source: ${this.currentSource.getSourceName()}`);
   }
 
-  purge = () => {
-    this.currentSource.dispose();
-    this.availableSources = [];
+  purge = async () => {
+    await this.currentSource.dispose();
   }
 
-  stop = () => {
-    this.currentSource.dispose();
+  stop = async () => {
+    await this.currentSource.dispose();
   }
 
   start = async () => {
