@@ -2,13 +2,9 @@ import { DeskThing } from "@deskthing/server"
 import { SongAbilities, SongData } from "@deskthing/types";
 import { MediaSource } from "./mediaSources/MediaSource";
 import { NativeMediaSource } from "./mediaSources/NativeMediaSource";
+import { WebNowPlayingSource } from "./mediaSources/WebNowPlayingSource";
 
 type MediaType = 'auto' | 'native' | 'wnp';
-
-// Stub for WebNowPlayingSource (to be implemented in Task 2)
-interface WebNowPlayingSourceStub extends MediaSource {
-  // Placeholder interface - will be replaced by actual implementation
-}
 
 export class MediaStore {
   private static instance: MediaStore;
@@ -16,7 +12,7 @@ export class MediaStore {
   // Media source abstraction
   private currentSource: MediaSource;
   private nativeSource: NativeMediaSource;
-  private wnpSource: WebNowPlayingSourceStub | null = null;
+  private wnpSource: WebNowPlayingSource | null = null;
 
   // Fallback settings
   private fallbackToNative: boolean = true;
@@ -169,7 +165,10 @@ export class MediaStore {
 
     if (sourceType === 'auto') {
       const wnpAvailable = await this.detectWNPAvailability();
-      if (wnpAvailable && this.wnpSource) {
+      if (wnpAvailable) {
+        if (!this.wnpSource) {
+          this.wnpSource = new WebNowPlayingSource();
+        }
         await this.switchToSource(this.wnpSource);
         console.log('Auto-detected: Using WebNowPlaying source');
       } else {
@@ -178,11 +177,9 @@ export class MediaStore {
       }
     } else if (sourceType === 'wnp') {
       if (!this.wnpSource) {
-        console.warn('WebNowPlaying source not yet implemented. Using native source.');
-        await this.switchToSource(this.nativeSource);
-      } else {
-        await this.switchToSource(this.wnpSource);
+        this.wnpSource = new WebNowPlayingSource();
       }
+      await this.switchToSource(this.wnpSource);
     } else {
       // sourceType === 'native'
       await this.switchToSource(this.nativeSource);

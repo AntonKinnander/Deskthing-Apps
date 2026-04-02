@@ -96,7 +96,7 @@ export class WebNowPlayingSource extends MediaSource {
 
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket.WebSocket(WebNowPlayingSource.WNP_URL);
+        this.ws = new WebSocket(WebNowPlayingSource.WNP_URL);
 
         // Set up connection timeout
         this.connectionTimeout = setTimeout(() => {
