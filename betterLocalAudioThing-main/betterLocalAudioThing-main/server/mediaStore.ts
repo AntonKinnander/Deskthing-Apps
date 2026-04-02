@@ -82,7 +82,23 @@ export class MediaStore {
   public async autoSelectSource(): Promise<void> {
     try {
       const settings = await DeskThing.getSettings();
-      const sourceType = settings.media_source as MediaType;
+      console.log('Raw settings from DeskThing:', JSON.stringify(settings));
+
+      // Handle different possible structures
+      let sourceType: MediaType;
+      if (settings && typeof settings === 'object') {
+        if ('media_source' in settings) {
+          sourceType = settings.media_source as MediaType;
+        } else if ('value' in settings && 'media_source' in settings.value) {
+          sourceType = settings.value.media_source as MediaType;
+        } else {
+          console.warn('Settings structure unexpected, defaulting to auto');
+          sourceType = 'auto';
+        }
+      } else {
+        sourceType = 'auto';
+      }
+
       console.log(`Auto-selecting media source: ${sourceType}`);
       await this.setSource(sourceType);
     } catch (error) {

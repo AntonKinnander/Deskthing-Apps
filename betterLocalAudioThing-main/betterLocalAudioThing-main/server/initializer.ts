@@ -70,8 +70,24 @@ DeskThing.on(SongEvent.SET, (data) => {
 
 // Listen for settings changes to dynamically switch media sources
 DeskThing.on(DESKTHING_EVENTS.SETTINGS, async (settings) => {
+  console.log('Settings event received, raw data:', JSON.stringify(settings))
   const mediaStore = MediaStore.getInstance()
-  const sourceType = settings.media_source as 'auto' | 'native' | 'wnp'
+
+  // Handle different possible structures
+  let sourceType: 'auto' | 'native' | 'wnp'
+  if (settings && typeof settings === 'object') {
+    if ('media_source' in settings) {
+      sourceType = settings.media_source as 'auto' | 'native' | 'wnp'
+    } else if ('value' in settings && typeof settings.value === 'object' && 'media_source' in settings.value) {
+      sourceType = settings.value.media_source as 'auto' | 'native' | 'wnp'
+    } else {
+      console.warn('Settings structure unexpected:', settings)
+      sourceType = 'auto'
+    }
+  } else {
+    sourceType = 'auto'
+  }
+
   console.log(`Settings changed - switching to source: ${sourceType}`)
   await mediaStore.setSource(sourceType)
 })
