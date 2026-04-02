@@ -92,16 +92,17 @@ export class WebNowPlayingSource extends MediaSource {
     }
 
     this.isInitializing = true;
+    console.log('WebNowPlaying: Attempting to connect to', WebNowPlayingSource.WNP_URL);
 
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(WebNowPlayingSource.WNP_URL);
+        this.ws = new WebSocket.WebSocket(WebNowPlayingSource.WNP_URL);
 
         // Set up connection timeout
         this.connectionTimeout = setTimeout(() => {
           if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
             this.ws.close();
-            console.error('WebNowPlaying: Connection timeout');
+            console.error('WebNowPlaying: ✗ Connection timeout - Make sure the WebNowPlaying browser extension is installed and running!');
             this.scheduleReconnect();
             reject(new Error('Connection timeout'));
           }
@@ -119,14 +120,16 @@ export class WebNowPlayingSource extends MediaSource {
           this.isInitializing = false;
           this.currentReconnectDelay = WebNowPlayingSource.INITIAL_RECONNECT_DELAY_MS;
 
-          console.log('WebNowPlaying: Connected');
+          console.log('WebNowPlaying: ✓ Connected successfully to browser extension');
 
           // Start heartbeat monitoring
           this.startHeartbeat();
 
           // Send handshake
           try {
+            console.log('WebNowPlaying: Sending handshake...');
             this.ws?.send('RECIPIENT');
+            console.log('WebNowPlaying: ✓ Handshake sent - Waiting for data...');
             resolve();
           } catch (error) {
             console.error('WebNowPlaying: Failed to send handshake:', error);
@@ -177,6 +180,19 @@ export class WebNowPlayingSource extends MediaSource {
       const message = data.toString();
       const wnpData: WNPData = JSON.parse(message);
 
+      // Debug: Log incoming WNP data
+      console.log('WebNowPlaying: Received data:', {
+        title: wnpData.title,
+        artist: wnpData.artist,
+        player: wnpData.player_name,
+        state: wnpData.state,
+        hasCoverUrl: !!wnpData.cover_url,
+        coverUrl: wnpData.cover_url?.substring(0, 50) + '...',
+        shuffle_active: wnpData.shuffle_active,
+        repeat_mode: wnpData.repeat_mode,
+        volume: wnpData.volume,
+      });
+
       // Download and save cover art if present
       let thumbnailUrl: string | null = null;
       if (wnpData.cover_url) {
@@ -186,7 +202,11 @@ export class WebNowPlayingSource extends MediaSource {
           /[<>:"/\\|?*]/g,
           '_'
         );
+        console.log('WebNowPlaying: Downloading cover art from:', wnpData.cover_url);
         thumbnailUrl = await saveImage(wnpData.cover_url, sanitizedFileName) || null;
+        console.log('WebNowPlaying: Cover art saved to:', thumbnailUrl);
+      } else {
+        console.log('WebNowPlaying: No cover_url in WNP data');
       }
 
       // Transform WNP data to SongData
@@ -285,8 +305,12 @@ export class WebNowPlayingSource extends MediaSource {
         return;
       }
 
+      // Debug: Log outgoing control commands
+      console.log('WebNowPlaying: Sending control command:', event);
+
       try {
         this.ws.send(JSON.stringify(event));
+        console.log('WebNowPlaying: Control command sent successfully');
         resolve();
       } catch (error) {
         console.error('WebNowPlaying: Failed to send control event:', error);
