@@ -34,12 +34,12 @@ export abstract class MediaSource {
   /**
    * Callback invoked when song data changes
    */
-  protected onSongChange: SongChangeCallback | null = null;
+  protected _onSongChangeCallback: SongChangeCallback | null = null;
 
   /**
    * Callback invoked when the source disconnects
    */
-  protected onDisconnect: DisconnectCallback | null = null;
+  protected _onDisconnectCallback: DisconnectCallback | null = null;
 
   /**
    * Initialize the media source
@@ -136,16 +136,16 @@ export abstract class MediaSource {
    * Register a callback for song change events
    * @param callback - Function to call when song data changes
    */
-  setOnSongChange(callback: SongChangeCallback): void {
-    this.onSongChange = callback;
+  onSongChange(callback: SongChangeCallback): void {
+    this._onSongChangeCallback = callback;
   }
 
   /**
    * Register a callback for disconnect events
    * @param callback - Function to call when the source disconnects
    */
-  setOnDisconnect(callback: DisconnectCallback): void {
-    this.onDisconnect = callback;
+  onDisconnect(callback: DisconnectCallback): void {
+    this._onDisconnectCallback = callback;
   }
 
   /**
@@ -153,8 +153,8 @@ export abstract class MediaSource {
    * Implementations should call this when song data is updated
    */
   protected notifySongChange(song: SongData | null): void {
-    if (this.onSongChange) {
-      this.onSongChange(song);
+    if (this._onSongChangeCallback) {
+      this._onSongChangeCallback(song);
     }
   }
 
@@ -163,8 +163,8 @@ export abstract class MediaSource {
    * Implementations should call this when disconnected
    */
   protected notifyDisconnect(): void {
-    if (this.onDisconnect) {
-      this.onDisconnect();
+    if (this._onDisconnectCallback) {
+      this._onDisconnectCallback();
     }
   }
 
