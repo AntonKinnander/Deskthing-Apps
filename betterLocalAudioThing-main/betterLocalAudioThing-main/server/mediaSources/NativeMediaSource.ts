@@ -25,7 +25,7 @@ export class NativeMediaSource extends MediaSource {
    * Creates the NowPlaying instance and subscribes to media session events
    */
   async initialize(): Promise<void> {
-    if (this.player) {
+    if (this.player && this.isSubscribed) {
       return; // Already initialized
     }
 
@@ -161,25 +161,7 @@ export class NativeMediaSource extends MediaSource {
     if (!this.currentMessage) {
       return [];
     }
-
-    const abilities: SongAbilities[] = [];
-    if (this.currentMessage.canFastForward) {
-      abilities.push(SongAbilities.FAST_FORWARD);
-    }
-    if (this.currentMessage.canLike) {
-      abilities.push(SongAbilities.LIKE);
-    }
-    if (this.currentMessage.canSkip) {
-      abilities.push(SongAbilities.NEXT);
-    }
-    if (this.currentMessage.canChangeVolume) {
-      abilities.push(SongAbilities.CHANGE_VOLUME);
-    }
-    if (this.currentMessage.canSetOutput) {
-      abilities.push(SongAbilities.SET_OUTPUT);
-    }
-
-    return abilities;
+    return this.getAbilitiesFromMessage(this.currentMessage);
   }
 
   /**
