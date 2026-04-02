@@ -52,6 +52,7 @@ export class WebNowPlayingSource extends MediaSource {
 
   private ws: WebSocket.WebSocket | null = null;
   private _isConnected = false;
+  private isInitializing = false;
   private isDisposed = false;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private connectionTimeout: NodeJS.Timeout | null = null;
@@ -68,6 +69,9 @@ export class WebNowPlayingSource extends MediaSource {
     if (this.ws && this._isConnected) {
       return; // Already initialized
     }
+    if (this.isInitializing) {
+      return; // Already initializing
+    }
 
     await this.connect();
   }
@@ -79,6 +83,11 @@ export class WebNowPlayingSource extends MediaSource {
     if (this.isDisposed) {
       return;
     }
+    if (this.isInitializing) {
+      return;
+    }
+
+    this.isInitializing = true;
 
     return new Promise((resolve, reject) => {
       try {
@@ -97,11 +106,13 @@ export class WebNowPlayingSource extends MediaSource {
         this.ws.on('open', async () => {
           if (this.isDisposed) {
             this.cleanup();
+            this.isInitializing = false;
             return;
           }
 
           this.clearConnectionTimeout();
           this._isConnected = true;
+          this.isInitializing = false;
           this.currentReconnectDelay = WebNowPlayingSource.INITIAL_RECONNECT_DELAY_MS;
 
           console.log('WebNowPlaying: Connected');
@@ -112,6 +123,7 @@ export class WebNowPlayingSource extends MediaSource {
             resolve();
           } catch (error) {
             console.error('WebNowPlaying: Failed to send handshake:', error);
+            this.isInitializing = false;
             reject(error);
           }
         });
@@ -124,9 +136,18 @@ export class WebNowPlayingSource extends MediaSource {
           console.error('WebNowPlaying: WebSocket error:', error.message);
         });
 
-        this.ws.on('close', () => {
+        this.ws.on('close', (code: number) => {
           this._isConnected = false;
-          console.log('WebNowPlaying: Disconnected');
+          this.isInitializing = false;
+
+          // Don't reconnect if this was a clean shutdown (code 1000)
+          if (code === 1000) {
+            console.log('WebNowPlaying: Clean shutdown, not reconnecting');
+            this.notifyDisconnect();
+            return;
+          }
+
+          console.log(`WebNowPlaying: Disconnected (code: ${code})`);
           this.notifyDisconnect();
           this.scheduleReconnect();
         });
@@ -149,7 +170,9 @@ export class WebNowPlayingSource extends MediaSource {
       // Download and save cover art if present
       let thumbnailUrl: string | null = null;
       if (wnpData.cover_url) {
-        const sanitizedFileName = `${wnpData.player_name}-${wnpData.title}-${wnpData.artist}`.replace(
+        const fileNameParts = [wnpData.player_name, wnpData.title, wnpData.artist]
+          .filter((part) => part && part.trim().length > 0);
+        const sanitizedFileName = (fileNameParts.length > 0 ? fileNameParts.join('-') : 'unknown').replace(
           /[<>:"/\\|?*]/g,
           '_'
         );
@@ -209,16 +232,16 @@ export class WebNowPlayingSource extends MediaSource {
   /**
    * Map DeskThing repeat mode to WNP format
    */
-  private mapToWNPRepeatMode(mode: 'off' | 'all' | 'track'): 'OFF' | 'ALL' | 'ONE' {
+  private mapToWNPRepeatMode(mode: 'off' | 'all' | 'track'): 'NONE' | 'ALL' | 'ONE' {
     switch (mode) {
       case 'off':
-        return 'OFF';
+        return 'NONE';
       case 'all':
         return 'ALL';
       case 'track':
         return 'ONE';
       default:
-        return 'OFF';
+        return 'NONE';
     }
   }
 
@@ -244,6 +267,11 @@ export class WebNowPlayingSource extends MediaSource {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebNowPlaying: Not connected'));
+        // If we're disconnected and not disposed, schedule a reconnection attempt
+        if (!this.isDisposed && !this.reconnectTimeout) {
+          console.log('WebNowPlaying: Control command failed due to disconnection, scheduling reconnection');
+          this.scheduleReconnect();
+        }
         return;
       }
 
@@ -265,7 +293,8 @@ export class WebNowPlayingSource extends MediaSource {
       return;
     }
 
-    console.log(`WebNowPlaying: Scheduling reconnect in ${this.currentReconnectDelay}ms`);
+    const reconnectDelay = this.currentReconnectDelay;
+    console.log(`WebNowPlaying: Scheduling reconnect in ${reconnectDelay}ms`);
 
     this.reconnectTimeout = setTimeout(async () => {
       this.reconnectTimeout = null;
@@ -275,9 +304,16 @@ export class WebNowPlayingSource extends MediaSource {
           await this.connect();
         } catch (error) {
           // Error already logged in connect()
+          // Check if we've hit max reconnection delay
+          if (this.currentReconnectDelay >= WebNowPlayingSource.MAX_RECONNECT_DELAY_MS) {
+            console.error(
+              'WebNowPlaying: Max reconnection delay reached. ' +
+                'The source may be permanently unavailable. Check if the browser extension is running.'
+            );
+          }
         }
       }
-    }, this.currentReconnectDelay);
+    }, reconnectDelay);
 
     // Exponential backoff: double the delay for next attempt, up to max
     this.currentReconnectDelay = Math.min(
@@ -306,7 +342,7 @@ export class WebNowPlayingSource extends MediaSource {
       this.reconnectTimeout = null;
     }
     if (this.ws) {
-      this.ws.close();
+      // Note: close() may have already been called in dispose()
       this.ws = null;
     }
   }
@@ -316,6 +352,10 @@ export class WebNowPlayingSource extends MediaSource {
    */
   async dispose(): Promise<void> {
     this.isDisposed = true;
+    // Close with code 1000 to indicate clean shutdown (prevents reconnection)
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.close(1000);
+    }
     this.cleanup();
     this.currentSongData = null;
   }
@@ -328,6 +368,10 @@ export class WebNowPlayingSource extends MediaSource {
   }
 
   // ========== Standard Playback Controls ==========
+  // NOTE: These playback controls are required by the MediaSource abstract interface
+  // (lines 67-117 in MediaSource.ts). While WebNowPlaying is primarily a metadata
+  // capture source, the WNP protocol supports sending control commands back to
+  // the browser player, so we implement these to provide full media control.
 
   /**
    * Resume playback
@@ -420,17 +464,11 @@ export class WebNowPlayingSource extends MediaSource {
   // ========== Status ==========
 
   /**
-   * Check if connected to the WebNowPlaying server
-   */
-  isConnectedStatus(): boolean {
-    return this._isConnected && this.ws?.readyState === WebSocket.OPEN;
-  }
-
-  /**
    * Check if the media source is currently connected and active
+   * @returns True if connected to WebNowPlaying server and WebSocket is open
    */
   isConnected(): boolean {
-    return this.isConnectedStatus();
+    return this._isConnected && this.ws?.readyState === WebSocket.OPEN;
   }
 
   /**
