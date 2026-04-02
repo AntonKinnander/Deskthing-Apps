@@ -81,6 +81,11 @@ export class MediaStore {
    */
   public async autoSelectSource(): Promise<void> {
     try {
+      // TEMPORARY: Force WNP mode for testing
+      console.log('*** TEMPORARY: Forcing WebNowPlaying mode for testing ***');
+      await this.setSource('wnp');
+      return;
+
       const settings = await DeskThing.getSettings();
       console.log('Raw settings from DeskThing:', JSON.stringify(settings));
 
