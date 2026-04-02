@@ -9,7 +9,7 @@ import { DeskThing } from "@deskthing/server";
 import { SETTING_TYPES, AppSettings } from "@deskthing/types";
 
 /**
- * Settings schema for the betterLocalAudioThing app
+ * Settings schema for the WNPAudioThing app
  *
  * Defines all user-configurable options:
  * - Media source selection (Auto-Detect, OS Native, WebNowPlaying)

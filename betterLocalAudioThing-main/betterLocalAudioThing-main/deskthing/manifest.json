@@ -1,0 +1,28 @@
+{
+    "id": "wnp-audio-thing",
+    "requires": [],
+    "label": "WNP Audio Thing",
+    "version": "1.0.6",
+    "description": "Audio source using WebNowPlaying browser extension for rich metadata and extended controls",
+    "author": "Fiznik",
+    "platforms": [
+        "windows",
+        "linux",
+        "mac",
+        "mac64",
+        "macarm",
+        "arm64",
+        "x64"
+    ],
+    "homepage": "https://github.com/Fiznik/WNPAudioThing",
+    "repository": "https://github.com/Fiznik/WNPAudioThing",
+    "template": "base",
+    "postinstall": true,
+    "tags": [
+        "audiosource"
+    ],
+    "requiredVersions": {
+        "server": ">=0.11.13",
+        "client": ">=0.11.2"
+    }
+}
