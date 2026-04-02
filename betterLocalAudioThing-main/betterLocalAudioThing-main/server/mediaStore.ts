@@ -3,6 +3,8 @@ import { SongAbilities, SongData } from "@deskthing/types";
 import { MediaSource } from "./mediaSources/MediaSource";
 import { NativeMediaSource } from "./mediaSources/NativeMediaSource";
 
+type MediaType = 'auto' | 'native' | 'wnp';
+
 // Stub for WebNowPlayingSource (to be implemented in Task 2)
 interface WebNowPlayingSourceStub extends MediaSource {
   // Placeholder interface - will be replaced by actual implementation
@@ -75,6 +77,23 @@ export class MediaStore {
    */
   public initializeListeners = async () => {
     await this.currentSource.initialize();
+  }
+
+  /**
+   * Auto-select media source based on current settings
+   * Reads the media_source setting and calls setSource accordingly
+   */
+  public async autoSelectSource(): Promise<void> {
+    try {
+      const settings = await DeskThing.getSettings();
+      const sourceType = settings.media_source as MediaType;
+      console.log(`Auto-selecting media source: ${sourceType}`);
+      await this.setSource(sourceType);
+    } catch (error) {
+      console.error('Error auto-selecting source:', error);
+      // Fallback to native on error
+      await this.setSource('native');
+    }
   }
 
   /**
