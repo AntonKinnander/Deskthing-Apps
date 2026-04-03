@@ -6,16 +6,22 @@
  * which provides rich metadata and control capabilities from web players.
  */
 
-import * as WebSocket from 'ws';
+import { WebSocket as WebSocketWS, Data } from 'ws';
 import { MediaSource } from './MediaSource';
 import { SongData, SongAbilities } from '@deskthing/types';
 import { saveImage } from '../imageUtils';
+
+// WebSocket ready state constants
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
+const WS_CLOSING = 2;
+const WS_CLOSED = 3;
 
 /**
  * JSON data format received from WebNowPlaying
  */
 interface WNPData {
-  state: 'PLAYING' | 'PAUSED';
+  state: 'PLAYING' | 'PAUSED' | 'STOPPED';
   player_name: string;
   title: string;
   artist: string;
@@ -52,7 +58,7 @@ export class WebNowPlayingSource extends MediaSource {
   private static readonly HEARTBEAT_INTERVAL_MS = 30000;
   private static readonly HEARTBEAT_TIMEOUT_THRESHOLD_MS = 60000;
 
-  private ws: WebSocket.WebSocket | null = null;
+  private ws: WebSocketWS | null = null;
   private _isConnected = false;
   private isInitializing = false;
   private isDisposed = false;
@@ -100,7 +106,7 @@ export class WebNowPlayingSource extends MediaSource {
 
         // Set up connection timeout
         this.connectionTimeout = setTimeout(() => {
-          if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+          if (this.ws && this.ws.readyState === WS_CONNECTING) {
             this.ws.close();
             console.error('WebNowPlaying: ✗ Connection timeout - Make sure the WebNowPlaying browser extension is installed and running!');
             this.scheduleReconnect();
@@ -144,6 +150,13 @@ export class WebNowPlayingSource extends MediaSource {
 
         this.ws.on('error', (error) => {
           console.error('WebNowPlaying: WebSocket error:', error.message);
+          // Reject the pending connection promise
+          if (this.connectionTimeout) {
+            this.clearConnectionTimeout();
+          }
+          this.isInitializing = false;
+          this.scheduleReconnect();
+          reject(error);
         });
 
         this.ws.on('close', (code: number) => {
@@ -178,7 +191,9 @@ export class WebNowPlayingSource extends MediaSource {
 
     try {
       const message = data.toString();
-      const wnpData: WNPData = JSON.parse(message);
+      // WNP sends field names that need mapping (e.g., 'State' -> 'state', 'player' -> 'player_name')
+      const mappedMessage = this.mapWNPJsonKeys(message);
+      const wnpData: WNPData = JSON.parse(mappedMessage);
 
       // Debug: Log incoming WNP data
       console.log('WebNowPlaying: Received data:', {
@@ -293,6 +308,33 @@ export class WebNowPlayingSource extends MediaSource {
   }
 
   /**
+   * Map WNP JSON field names to match expected format
+   * WNP sends field names like 'State', 'player', 'Title', etc.
+   * This converts them to 'state', 'player_name', 'title', etc.
+   * Based on: https://github.com/keifufu/WebNowPlaying-Redux-OBS
+   */
+  private mapWNPJsonKeys(jsonStr: string): string {
+    // Order matters - replace longer specific keys first to avoid partial replacements
+    return jsonStr
+      .replace(/"State"/g, '"state"')
+      .replace(/"player"/g, '"player_name"')
+      .replace(/"Title"/g, '"title"')
+      .replace(/"Artist"/g, '"artist"')
+      .replace(/"Album"/g, '"album"')
+      .replace(/"CoverUrl"/g, '"cover_url"')
+      .replace(/"Duration"/g, '"duration"')
+      .replace(/"DurationSeconds"/g, '"duration_seconds"')
+      .replace(/"Position"/g, '"position"')
+      .replace(/"PositionSeconds"/g, '"position_seconds"')
+      .replace(/"PositionPercent"/g, '"position_percent"')
+      .replace(/"Volume"/g, '"volume"')
+      .replace(/"Rating"/g, '"rating"')
+      .replace(/"RepeatState"/g, '"repeat_mode"')
+      .replace(/"Shuffle"/g, '"shuffle_active"')
+      .replace(/"Timestamp"/g, '"timestamp"');
+  }
+
+  /**
    * Get the supported WNP abilities
    */
   private getWNPAbilities(): SongAbilities[] {
@@ -312,7 +354,7 @@ export class WebNowPlayingSource extends MediaSource {
    */
   private sendControlEvent(event: WNPControlEvent): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (!this.ws || this.ws.readyState !== 1) { // 1 = OPEN
         reject(new Error('WebNowPlaying: Not connected'));
         // If we're disconnected and not disposed, schedule a reconnection attempt
         if (!this.isDisposed && !this.reconnectTimeout) {
@@ -446,7 +488,7 @@ export class WebNowPlayingSource extends MediaSource {
   async dispose(): Promise<void> {
     this.isDisposed = true;
     // Close with code 1000 to indicate clean shutdown (prevents reconnection)
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WS_OPEN) {
       this.ws.close(1000);
     }
     this.cleanup();
@@ -561,7 +603,7 @@ export class WebNowPlayingSource extends MediaSource {
    * @returns True if connected to WebNowPlaying server and WebSocket is open
    */
   isConnected(): boolean {
-    return this._isConnected && this.ws?.readyState === WebSocket.OPEN;
+    return this._isConnected && this.ws?.readyState === WS_OPEN;
   }
 
   /**
